@@ -11,6 +11,6 @@
     "wrangler": "^3.25.0"
   },
   "dependencies": {
-    "js-yaml": "^4.1.0"
+    "js-yaml": "^4.3.1"
   }
 }

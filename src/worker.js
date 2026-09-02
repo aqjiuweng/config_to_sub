@@ -1,5 +1,7 @@
 import yaml from 'js-yaml'; // npm install js-yaml
 
+const whoNekoBox = '' // 针对mieru节点，使用哪个NekoBox的继承版本，Throne(默认)、NyameBox(lblis 5.11.28.2 2026-07-30)
+
 // ----------------------------------------- 解析和构建 hysteria 节点 ---------------------------------------
 
 function parse_hysteria(outbounds_n) {
@@ -243,6 +245,19 @@ function parse_shadowsocks(outbounds_n) {
 	return `${base64Decode('c3M6Ly8')}${base64EncodedString}@${address}:${port}#[ss]_${address}`;
 }
 
+// -------------------------------------- 解析和构建 shadowtls 节点 ---------------------------------------
+// singbox
+function parse_shadowtls(outbounds_n) {
+	let server = findFieldValue(outbounds_n, 'server') || '';
+	let server_port = findFieldValue(outbounds_n, 'server_port') || findFieldValue(outbounds_n, 'port');
+	let version = findFieldValue(outbounds_n, 'version') || 3;
+	let password = findFieldValue(outbounds_n, 'password') || '';
+	let tls = findFieldValue(outbounds_n, 'enabled') ? 'tls' : 'none';
+	let sni = findFieldValue(outbounds_n, 'server_name') || '';
+
+	return `shadowtls://:${password}@${server}:${server_port}?version=${version}&security=${tls}&sni=${sni}#[shadowtls]_${server}`;
+}
+
 // ----------------------------------------- 解析和构建 trojan 节点 -----------------------------------------
 
 function parse_tr0jan(outbounds_n) {
@@ -321,6 +336,42 @@ function parse_tuic(outbounds_n) {
 	const encodedParams = new URLSearchParams(filteredParams).toString();
 
 	return `tuic://${uuid}:${password}@${server}:${port}?${encodedParams}#[tuic]_${server}`;
+}
+
+// ------------------------------------------ 解析和构建 mieru 节点 ------------------------------------------
+
+function parser_mieru(jsonObject) {
+	let multiplexing = findFieldValue(jsonObject, 'multiplexing') || "MULTIPLEXING_LOW";
+	let userName = encodeURIComponent(findFieldValue(jsonObject, 'username') || findFieldValue(jsonObject, 'user'));
+	let userPassword = encodeURIComponent(findFieldValue(jsonObject, 'password'));
+	let server = findFieldValue(jsonObject, 'server') || findFieldValue(jsonObject, 'address');
+	let port = findFieldValue(jsonObject, 'port') || findFieldValue(jsonObject, 'server_port');
+	let protocol = findFieldValue(jsonObject, 'transport') || findFieldValue(jsonObject, 'network').toUpperCase() || 'TCP';
+	// let traffic_pattern = findFieldValue(jsonObject, 'traffic_pattern') || '';
+	// Throne  https://github.com/throneproj/Throne
+	let mieruThrone = `mierus://${userName}:${userPassword}@${server}?profile=default&port=${port}&protocol=${protocol}&multiplexing=${multiplexing}#${userName}`;
+	// NyameBox/lblis   https://github.com/qr243vbi/nekobox
+	let mieruNyameBox = `mierus://${userName}:${userPassword}@${server}:${port}?transport=${protocol}&multiplexing=${multiplexing}#${userName}`;
+	let link = whoNekoBox.toLowerCase() === 'nyamebox' ? mieruNyameBox : mieruThrone;
+	return link;
+}
+
+// ------------------------------------------ 解析和构建 juicity 节点 ------------------------------------------
+
+function parse_juicity(jsonObject) {
+	let uuid = findFieldValue(jsonObject, 'uuid');
+	let password = encodeURIComponent(findFieldValue(jsonObject, 'password'));
+	let server = findFieldValue(jsonObject, 'server');
+	let port = findFieldValue(jsonObject, 'port') || findFieldValue(jsonObject, 'server_port');
+	let addr = findFieldValue(jsonObject, 'address') || `${server}:${port}`;
+	let congestion_control = findFieldValue(jsonObject, 'congestion_control') || 'bbr';
+	let param = new URLSearchParams({
+		security: findFieldValue(jsonObject, 'enabled') ? 'tls' : 'none',
+		sni: findFieldValue(jsonObject, 'server_name') || findFieldValue(jsonObject, 'sni') || server,
+		allowInsecure: String(findFieldValue(jsonObject, 'insecure') || 'false') || String(findFieldValue(jsonObject, 'allow_insecure') || 'false'),
+	});
+	let juicityLink = `juicity://${uuid}:${password}@${addr}?congestion_control=${congestion_control}&${param}#${server}`;
+	return juicityLink;
 }
 
 // ------------------------------------- 判断是否为mieru或juicity的代理 -------------------------------------
@@ -412,10 +463,10 @@ function stripHtmlTags(str) {
 	// 动态生成正则表达式，匹配所有实体
 	const regex = new RegExp(
 		'&(' +
-			Object.keys(entities)
-				.map((e) => e.slice(1, -1))
-				.join('|') +
-			');',
+		Object.keys(entities)
+			.map((e) => e.slice(1, -1))
+			.join('|') +
+		');',
 		'g'
 	);
 	// 替换HTML实体
@@ -438,9 +489,10 @@ async function fetchAndProcessUrl(url) {
 		if (links.length > 0) {
 			// 存储多个节点链接
 			const uniqueSet = new Set();
-			// let proxyPrefix = ['hysteria://', 'hy2://', 'vless://', 'vmess://', 'trojan://', 'ss://', 'tuic://', 'naive+https://'];
+			// let proxyPrefix = ['hysteria://', 'hysteria2://', 'hy2://', 'vless://', 'vmess://', 'trojan://', 'ss://', 'tuic://', 'naive+https://', 'mierus://', 'juicity://', 'shadowtls://'];
 			let proxyPrefix = [
 				'aHlzdGVyaWE6Ly8',
+				'aHlzdGVyaWEyOi8v',
 				'aHkyOi8v',
 				'dmxlc3M6Ly8',
 				'dm1lc3M6Ly8',
@@ -448,6 +500,9 @@ async function fetchAndProcessUrl(url) {
 				'c3M6Ly8',
 				'dHVpYzovLw',
 				'bmFpdmUraHR0cHM6Ly8',
+				'bWllcnVzOi8v',
+				'anVpY2l0eTovLw==',
+				'c2hhZG93dGxzOi8v'
 			];
 			links.split('\n').forEach((link) => {
 				if (proxyPrefix.some((prefix) => link.startsWith(base64Decode(prefix)))) uniqueSet.add(link);
@@ -468,11 +523,34 @@ async function fetchAndProcessUrl(url) {
 
 		// mieru
 		let is_mieru = isMieru(jsonObject);
-		if (is_mieru) return ''; // 丢弃
+		if (is_mieru) {
+			let multiplexing = findFieldValue(jsonObject, 'multiplexing') || "MULTIPLEXING_LOW";
+			let profile = findFieldValue(jsonObject, 'profileName');
+			let userName = encodeURIComponent(findFieldValue(jsonObject, 'name'));
+			let userPassword = encodeURIComponent(findFieldValue(jsonObject, 'password'));
+			let ipAddress = findFieldValue(jsonObject, 'ipAddress');
+			let port = findFieldValue(jsonObject, 'port');
+			let protocol = findFieldValue(jsonObject, 'protocol');
+			let mieruThrone = `mierus://${userName}:${userPassword}@${ipAddress}?profile=${profile}&port=${port}&protocol=${protocol}&multiplexing=${multiplexing}#${userName}`;
+			let mieruNyameBox = `mierus://${userName}:${userPassword}@${ipAddress}:${port}?transport=${protocol}&multiplexing=${multiplexing}#${userName}`;
+			let link = whoNekoBox.toLowerCase() === 'nyamebox' ? mieruNyameBox : mieruThrone;
+			return link;
+		}
 
 		// juicity
 		let is_juicity = isJuicity(jsonObject);
-		if (is_juicity) return ''; // 丢弃
+		if (is_juicity) {
+			let uuid = findFieldValue(jsonObject, 'uuid');
+			let password = encodeURIComponent(findFieldValue(jsonObject, 'password'));
+			let server = findFieldValue(jsonObject, 'server');
+			let param = new URLSearchParams({
+				security: "tls",
+				sni: findFieldValue(jsonObject, 'sni'),
+				allowInsecure: findFieldValue(jsonObject, 'allow_insecure')
+			});
+			let juicityLink = `juicity://${uuid}:${password}@${server}?congestion_control=${findFieldValue(jsonObject, 'congestion_control')}&${param}#${server}`;
+			return juicityLink;
+		}
 
 		// hy2
 		let server = findFieldValue(jsonObject, 'server')?.replace(/,.*$/, '') || ''; // 如果字符串中含有逗号，就删除逗号及其后面的字符
@@ -550,8 +628,8 @@ async function fetchAndProcessUrl(url) {
 		// 存储多个节点链接
 		const uniqueSet = new Set();
 
-		// let allProxyType = ['hysteria', 'hy2', 'vless', 'vmess', 'trojan', 'ss', 'tuic'];
-		let allProxyType = ['aHlzdGVyaWE', 'aHky', 'dmxlc3M', 'dm1lc3M', 'dHJvamFu', 'c3M', 'dHVpYw'];
+		// let allProxyType = ['hysteria', 'hy2', 'vless', 'vmess', 'trojan', 'ss', 'tuic', 'mieru', 'juicity'];
+		let allProxyType = ['aHlzdGVyaWE', 'aHky', 'dmxlc3M', 'dm1lc3M', 'dHJvamFu', 'c3M', 'dHVpYw', 'bWllcnU=', 'anVpY2l0eQ=='];
 		// 遍历数组中的节点
 		for (var i = 0; i < outbounds.length; i++) {
 			let proxyType = findFieldValue(outbounds[i], 'protocol');
@@ -599,6 +677,16 @@ async function fetchAndProcessUrl(url) {
 				let tuic = parse_tuic(outbounds[i]);
 				if (tuic) {
 					uniqueSet.add(tuic);
+				}
+			} else if (proxyType === base64Decode('bWllcnU=')) {
+				let mieru = parser_mieru(outbounds[i]);
+				if (mieru) {
+					uniqueSet.add(mieru);
+				}
+			} else if (proxyType === base64Decode('anVpY2l0eQ==')) {
+				let juicity = parse_juicity(outbounds[i]);
+				if (juicity) {
+					uniqueSet.add(juicity);
 				}
 			}
 		}
@@ -659,12 +747,12 @@ function isValidBase64(str) {
 	}
 }
 
-// ------------------------------- 抓取的网页内容是否为v2ray/nekoray分享链接？ -------------------------------
+// ------------------------------- 抓取的网页内容是否为v2ray/nekoray/throne分享链接？ -------------------------------
 
 function v2rayLinksHandle(str) {
 	let isBase64Str = isValidBase64(str);
 
-	// let proxyPrefix = ['hysteria://', 'hy2://', 'vless://', 'vmess://', 'trojan://', 'ss://', 'tuic://', 'naive+https://'];
+	// let proxyPrefix = ['hysteria://', 'hy2://', 'vless://', 'vmess://', 'trojan://', 'ss://', 'tuic://', 'naive+https://', 'mierus://', 'juicity://', 'shadowtls://];
 	let proxyPrefix = [
 		'aHlzdGVyaWE6Ly8',
 		'aHkyOi8v',
@@ -674,6 +762,9 @@ function v2rayLinksHandle(str) {
 		'c3M6Ly8',
 		'dHVpYzovLw',
 		'bmFpdmUraHR0cHM6Ly8',
+		'bWllcnVzOi8v',
+		'anVpY2l0eTovLw==',
+		'c2hhZG93dGxzOi8v'
 	];
 	// 粗略判断是否为明文分享链接，是则原字符串返回
 	if (typeof str === 'string' && !isBase64Str && proxyPrefix.some((prefix) => str.includes(base64Decode(prefix)))) {
@@ -702,15 +793,9 @@ function v2rayLinksHandle(str) {
  */
 const targetUrls = [
 	// ChromeGo/EdgeGo的订阅链接(已剔除内容重复的订阅链接)
-	'https://fastly.jsdelivr.net/gh/Alvin9999/PAC@latest/backup/img/1/2/ipp/naiveproxy/2/config.json',
-	'https://fastly.jsdelivr.net/gh/Alvin9999/PAC@latest/backup/img/1/2/ipp/hysteria2/2/config.json',
 	'https://www.gitlabip.xyz/Alvin9999/PAC/master/backup/img/1/2/ipp/hysteria2/3/config.json',
 	'https://www.gitlabip.xyz/Alvin9999/PAC/master/backup/img/1/2/ipp/naiveproxy/1/config.json',
-	'https://fastly.jsdelivr.net/gh/Alvin9999/PAC@latest/backup/img/1/2/ipp/xray/2/config.json',
-	'https://fastly.jsdelivr.net/gh/Alvin9999/PAC@latest/backup/img/1/2/ipp/xray/4/config.json',
-	'https://fastly.jsdelivr.net/gh/Alvin9999/PAC@latest/backup/img/1/2/ip/singbox/2/config.json',
-	'https://www.gitlabip.xyz/Alvin9999/PAC/master/backup/img/1/2/ipp/singbox/1/config.json',
-	'https://fastly.jsdelivr.net/gh/Alvin9999/PAC@latest/backup/img/1/2/ipp/hysteria/2/config.json',
+	// 'https://www.gitlabip.xyz/Alvin9999/PAC/master/backup/img/1/2/ipp/singbox/1/config.json', // 源json数据出现格式问题
 	'https://www.gitlabip.xyz/Alvin9999/PAC/master/backup/img/1/2/ipp/hysteria/3/config.json',
 	'https://www.gitlabip.xyz/Alvin9999/PAC/master/backup/img/1/2/ipp/hysteria/1/config.json',
 	'https://gitlab.com/free9999/ipupdate/-/raw/master/backup/img/1/2/ipp/hysteria/3/config.json',
@@ -718,17 +803,17 @@ const targetUrls = [
 	'https://gitlab.com/free9999/ipupdate/-/raw/master/hysteria/2/config.json',
 	'https://gitlab.com/free9999/ipupdate/-/raw/master/hysteria2/2/config.json',
 	'https://www.gitlabip.xyz/Alvin9999/PAC/master/backup/img/1/2/ipp/clash.meta2/5/config.yaml',
-	'https://fastly.jsdelivr.net/gh/Alvin9999/PAC@latest/backup/img/1/2/ipp/clash.meta2/4/config.yaml',
 	'https://www.gitlabip.xyz/Alvin9999/PAC/master/backup/img/1/2/ipp/clash.meta2/1/config.yaml',
-	// 'https://fastly.jsdelivr.net/gh/jsvpn/jsproxy@dev/yule/20200325/1299699.md',
 	'https://www.gitlabip.xyz/Alvin9999/PAC/master/backup/img/1/2/ip/clash.meta2/1/config.yaml',
-	'https://fastly.jsdelivr.net/gh/Alvin9999/pac2@latest/quick/config.yaml',
-	'https://fastly.jsdelivr.net/gh/Alvin9999/pac2@latest/quick/4/config.yaml',
 	// 也可以添加其它来源且数据格式为json或yaml的订阅链接
-	'https://raw.githubusercontent.com/aiboboxx/clashfree/main/clash.yml',
+	// 'https://raw.githubusercontent.com/cbusifabcap/daily_free_vpn/refs/heads/main/sub/mihomo.yml', // 数据太多处理不过来
 	// 可以添加明文v2ray分享链接的订阅或base64订阅链接
-	'https://raw.githubusercontent.com/aiboboxx/v2rayfree/main/v2',
 	'https://ghfast.top/https://raw.githubusercontent.com/free18/v2ray/refs/heads/main/v.txt',
+	// "https://raw.githubusercontent.com/cbusifabcap/daily_free_vpn/refs/heads/main/sub/sub.yml", // 失效节点过多
+	// juicity、mieru
+	'https://www.67867867.xyz/Alvin9999/PAC/refs/heads/master/backup/img/1/2/ip/mieru/1/config.json',
+	'https://www.67867867.xyz/Alvin9999/PAC/refs/heads/master/backup/img/1/2/ipp/juicity/1/config.json',
+	'https://www.67867867.xyz/Alvin9999/PAC/refs/heads/master/backup/img/1/2/ipp/juicity/2/config.json',
 ];
 
 // --------------------------------------- 操作targetUrls和构建节点的入口 ------------------------------------
